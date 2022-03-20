@@ -1,0 +1,4 @@
+{
+    accToken : Text
+  , accSecret : Text
+  }

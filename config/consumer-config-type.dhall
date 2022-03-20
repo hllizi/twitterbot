@@ -1,0 +1,6 @@
+
+
+{
+    consKey : Text
+  , consSecret : Text
+}
