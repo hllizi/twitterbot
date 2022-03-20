@@ -2,6 +2,8 @@
 {-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PatternGuards #-}
+{-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE DisambiguateRecordFields #-}
 {-# OPTIONS_GHC -Wno-deferred-out-of-scope-variables #-}
 
 import Conduit
@@ -17,7 +19,7 @@ import qualified Data.Text.IO as T
 import qualified Data.Text.Lazy
 import Dhall
 import Network.HTTP.Conduit as HTTP
-import RIO (RIO, UnliftIO (unliftIO), ask)
+import RIO (RIO, UnliftIO (unliftIO), ask, runRIO)
 import RIO.Text (decodeUtf8', encodeUtf8)
 import System.Directory
 import System.FilePath
@@ -37,38 +39,50 @@ phrasesFile = "/home/dlahm/Projekte/TwitterBot/config/phrases.dhall"
 ($^.) m f = fmap (^. f) m
 
 data Env = Env
-  { tokens :: OAuth,
-    credentials :: Credential
+  {  tokens :: OAuth
+   , credentials :: Credential
+   , botConfig :: BotConfig
   }
 
 class HasAccess env where
   tokensL :: Lens' env OAuth
   credentialsL :: Lens' env Credential
 
+class HasBotConfig env where
+  botConfigL :: Lens' env BotConfig
+
 instance HasAccess Env where
   tokensL = lens tokens (\x y -> x {tokens = y})
   credentialsL = lens credentials (\x y -> x {credentials = y})
 
+instance HasBotConfig Env where
+    botConfigL = lens botConfig (\x y -> x {botConfig = y})
+
 getTokens :: IO OAuth
 getTokens = do
-  accessConfig <- getAccessConfig
+  config <- getConfig
   return $
     twitterOAuth
-      { oauthConsumerKey = encodeUtf8 $ accessConfig ^. consumer . consKey,
-        oauthConsumerSecret = encodeUtf8 $ accessConfig ^. consumer . consSecret
+      { oauthConsumerKey = encodeUtf8 $ config ^. auth . consumer . consKey,
+        oauthConsumerSecret = encodeUtf8 $ config ^. auth . consumer . consSecret
       }
 
 getCredentials :: IO Credential
 getCredentials = do
-  accessConfig <- getAccessConfig
+  config <- getConfig
   return $
     Credential
-      [ ("oauth_token", encodeUtf8 $ accessConfig ^. access . accToken),
-        ("oauth_token_secret", encodeUtf8 $ accessConfig ^. access . accSecret)
+      [ ("oauth_token", encodeUtf8 $ config ^. auth. access . accToken),
+        ("oauth_token_secret", encodeUtf8 $ config ^. auth . access . accSecret)
       ]
 
-getAccessConfig :: IO OAuthConf
-getAccessConfig = do
+getBotConfig :: IO BotConfig
+getBotConfig = do 
+  config <- getConfig
+  return $ config ^. dhallBotConfig
+
+getConfig :: IO Config
+getConfig = do
   input
     auto
     configFile
@@ -104,7 +118,12 @@ performOnTracked keywords action = do
               _ -> Nothing
           )
         .| filterC ((/= 1497897132048760839) . view (statusUser . userId))
-        .| mapC (\status -> (status ^. statusId, status ^. statusUser . userScreenName))
+        .| mapC (
+                    \status -> (
+                        status ^. statusId, 
+                        status ^. statusUser . userScreenName
+                        )
+                )
         .| iterMC (liftIO . print)
         .| mapMC (lift . action)
         .| sinkNull
@@ -130,5 +149,8 @@ replyTo (id, screenName) = do
 
 main :: IO ()
 main = do
+  env <- Env <$> getTokens 
+             <*> getCredentials
+             <*> getBotConfig
   --timeline <- call twinfo mgr statusesHomeTimeline
-  runRIO $ performOnTracked ["Kitzbühel"] replyTo
+  runRIO env $ performOnTracked ["Kitzbühel"] replyTo

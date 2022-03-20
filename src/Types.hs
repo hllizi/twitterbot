@@ -33,8 +33,8 @@ instance FromDhall Consumer where
     
 
 data Access = Access
-  { _accToken :: Text,
-    _accSecret :: Text
+  { _accToken :: !Text,
+    _accSecret :: !Text
   }
   deriving (Generic, Show)
 
@@ -42,14 +42,33 @@ instance FromDhall Access where
     autoWith _ = customAuto
 
 data OAuthConf = OAuthConf
-  { _consumer :: Consumer,
-    _access :: Access
+  { _consumer :: !Consumer,
+    _access :: !Access
   }
   deriving (Generic, Show)
 
 instance FromDhall OAuthConf where
     autoWith _ = customAuto
 
+data Config = Config 
+  {
+      _auth :: !OAuthConf
+   ,  _dhallBotConfig :: !BotConfig
+  }  
+  deriving (Generic, Show)
+
+instance FromDhall Config where
+    autoWith _ = customAuto
+
+newtype BotConfig = BotConfig {
+    _phrases :: [Text]
+}
+  deriving (Generic, Show)
+
+instance FromDhall BotConfig where
+    autoWith _ = customAuto
+
+$(makeLenses ''Config)
 $(makeLenses ''Consumer)
 $(makeLenses ''Access)
 $(makeLenses ''OAuthConf)
