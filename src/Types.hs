@@ -60,8 +60,18 @@ data Config = Config
 instance FromDhall Config where
     autoWith _ = customAuto
 
+data TriggeredPhrasesConfig = TriggeredPhrasesConfig {
+        _phrases :: [Text]
+    ,   _triggers :: [Text]
+    }
+    deriving (Generic, Show)
+
+instance FromDhall TriggeredPhrasesConfig where
+    autoWith _ = customAuto
+
 newtype BotConfig = BotConfig {
-    _phrases :: [Text]
+    _triggeredPhrases :: [TriggeredPhrasesConfig]
+
 }
   deriving (Generic, Show)
 
@@ -69,6 +79,8 @@ instance FromDhall BotConfig where
     autoWith _ = customAuto
 
 $(makeLenses ''Config)
+$(makeLenses ''BotConfig)
+$(makeLenses ''TriggeredPhrasesConfig)
 $(makeLenses ''Consumer)
 $(makeLenses ''Access)
 $(makeLenses ''OAuthConf)

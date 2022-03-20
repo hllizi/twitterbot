@@ -136,11 +136,10 @@ getPhrases = do
     auto
     phrasesFile
 
-replyTo :: HasAccess env => (StatusId, ScreenName) -> RIO env ()
-replyTo (id, screenName) = do
+replyTo :: HasAccess env => [Text] -> (StatusId, ScreenName) -> RIO env ()
+replyTo phrases (id, screenName) = do
   twinfo <- getTwinfo
   mgr <- liftIO getManager
-  phrases <- liftIO getPhrases
   liftIO $ do
     index <- randomIndex (length phrases - 1)
     let replyText = "@" <> screenName <> " " <> (phrases !! index)
@@ -153,4 +152,10 @@ main = do
              <*> getCredentials
              <*> getBotConfig
   --timeline <- call twinfo mgr statusesHomeTimeline
-  runRIO env $ performOnTracked ["Kitzbühel"] replyTo
+  runRIO env $ do 
+    triggeredPhrasesConfigs <- ask $^. (botConfigL . triggeredPhrases)
+    mapM_ (\triggeredPhrasesConfig -> do
+                performOnTracked  
+                    (triggeredPhrasesConfig ^. triggers) 
+                    (replyTo (triggeredPhrasesConfig ^. phrases)))
+          triggeredPhrasesConfigs

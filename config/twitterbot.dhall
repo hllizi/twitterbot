@@ -4,5 +4,12 @@
     ,           access.accToken = "1497897132048760839-5y9xfFqsPhXup8OU6H6ffgK92KyGvp"
     ,           access.accSecret = "050dVbd3bnGgK0Mb3NEXveRdfTuXx9OYALZHmvDSGMULc"
     }
-    ,   dhallBotConfig.phrases = ./phrases.dhall
+    ,   dhallBotConfig = {
+                triggeredPhrases = 
+                [ {
+                        phrases = ./phrases.dhall
+                    ,   triggers = ./triggers.dhall
+                    }
+                ]
+                }
     }
