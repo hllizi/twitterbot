@@ -1,0 +1,7 @@
+cradle:
+  cabal:
+    - path: "src/Main.hs"
+      component: "twitterbot:exe:twitterbot"
+
+    - path: "src/Types.hs"
+      component: "twitterbot:exe:twitterbot"

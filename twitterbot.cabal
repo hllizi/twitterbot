@@ -1,0 +1,32 @@
+cabal-version: 2.2
+name: twitterbot
+version: 0.0.1
+license: AGPL-3.0-or-later
+license-file: LICENSE
+build-type: Simple
+
+executable twitterbot
+    main-is: Main.hs
+    hs-source-dirs: src
+    other-modules: Types
+    build-depends: 
+        base,
+        dhall,
+        rio,
+        twitter-conduit,
+        twitter-types-lens,
+        lens,
+        bytestring,
+        case-insensitive,
+        containers,
+        http-conduit,
+        network-uri,
+        conduit,
+        resourcet,
+        text,
+        conduit-extra,
+        process,
+        directory,
+        filepath,
+        rio,
+        random
