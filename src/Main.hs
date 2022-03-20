@@ -1,9 +1,9 @@
+{-# LANGUAGE DisambiguateRecordFields #-}
+{-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PatternGuards #-}
-{-# LANGUAGE DuplicateRecordFields #-}
-{-# LANGUAGE DisambiguateRecordFields #-}
 {-# OPTIONS_GHC -Wno-deferred-out-of-scope-variables #-}
 
 import Conduit
@@ -19,7 +19,8 @@ import qualified Data.Text.IO as T
 import qualified Data.Text.Lazy
 import Dhall
 import Network.HTTP.Conduit as HTTP
-import RIO (RIO, UnliftIO (unliftIO), ask, runRIO)
+import Options.Applicative hiding (auto)
+import RIO (Exception, SomeException, RIO, UnliftIO (unliftIO), ask, asks, catch, runRIO, trace)
 import RIO.Text (decodeUtf8', encodeUtf8)
 import System.Directory
 import System.FilePath
@@ -31,7 +32,7 @@ import Web.Twitter.Conduit.Parameters
 import Web.Twitter.Conduit.Status
 import Web.Twitter.Types.Lens
 
-configFile = "/home/dlahm/Projekte/TwitterBot/config/twitterbot.dhall"
+configFileDefault = "/etc/twitterbot.dhall"
 
 phrasesFile = "/home/dlahm/Projekte/TwitterBot/config/phrases.dhall"
 
@@ -39,9 +40,9 @@ phrasesFile = "/home/dlahm/Projekte/TwitterBot/config/phrases.dhall"
 ($^.) m f = fmap (^. f) m
 
 data Env = Env
-  {  tokens :: OAuth
-   , credentials :: Credential
-   , botConfig :: BotConfig
+  { tokens :: OAuth,
+    credentials :: Credential,
+    botConfig :: BotConfig
   }
 
 class HasAccess env where
@@ -56,9 +57,15 @@ instance HasAccess Env where
   credentialsL = lens credentials (\x y -> x {credentials = y})
 
 instance HasBotConfig Env where
-    botConfigL = lens botConfig (\x y -> x {botConfig = y})
+  botConfigL = lens botConfig (\x y -> x {botConfig = y})
 
-getTokens :: IO OAuth
+class HasConfigFile env where
+  configFileL :: Lens' env String
+
+instance HasConfigFile ConfigFile where
+  configFileL = lens conf (\x y -> x {conf = y})
+
+getTokens :: HasConfigFile env => RIO env OAuth
 getTokens = do
   config <- getConfig
   return $
@@ -67,27 +74,29 @@ getTokens = do
         oauthConsumerSecret = encodeUtf8 $ config ^. auth . consumer . consSecret
       }
 
-getCredentials :: IO Credential
+getCredentials :: HasConfigFile env => RIO env Credential
 getCredentials = do
   config <- getConfig
   return $
     Credential
-      [ ("oauth_token", encodeUtf8 $ config ^. auth. access . accToken),
+      [ ("oauth_token", encodeUtf8 $ config ^. auth . access . accToken),
         ("oauth_token_secret", encodeUtf8 $ config ^. auth . access . accSecret)
       ]
 
-getBotConfig :: IO BotConfig
-getBotConfig = do 
+getBotConfig :: HasConfigFile env => RIO env BotConfig
+getBotConfig = do
   config <- getConfig
   return $ config ^. dhallBotConfig
 
-getConfig :: IO Config
+getConfig :: HasConfigFile env => RIO env Config
 getConfig = do
-  input
-    auto
-    configFile
+  configFile <- T.pack <$> asks (view configFileL)
+  liftIO $
+    input
+      auto
+      configFile
 
-getTwinfo :: HasAccess m => RIO m TWInfo
+getTwinfo :: HasAccess env => RIO env TWInfo
 getTwinfo = do
   tokens <- ask $^. tokensL
   credentials <- ask $^. credentialsL
@@ -103,32 +112,34 @@ randomIndex max = do
 
 type ScreenName = Text
 
-performOnTracked :: HasAccess m => [Text] -> ((StatusId, ScreenName) -> RIO m ()) -> RIO m ()
+performOnTracked :: HasAccess env => [Text] -> ((StatusId, ScreenName) -> RIO env ()) -> RIO env ()
 performOnTracked keywords action = do
   twinfo <- getTwinfo
   mgr <- liftIO getManager
   phrases <- liftIO getPhrases
-  runResourceT $ do
-    tweetStream <- stream twinfo mgr (statusesFilter [Track keywords])
-    runConduit $
-      tweetStream
-        .| concatMapC
-          ( \case
-              SStatus status -> Just status
-              _ -> Nothing
-          )
-        .| filterC ((/= 1497897132048760839) . view (statusUser . userId))
-        .| mapC (
-                    \status -> (
-                        status ^. statusId, 
-                        status ^. statusUser . userScreenName
-                        )
-                )
-        .| iterMC (liftIO . print)
-        .| mapMC (lift . action)
-        .| sinkNull
-
-  return ()
+  catch
+    ( runResourceT $ do
+        tweetStream <- stream twinfo mgr (statusesFilter [Track keywords])
+        runConduit $
+          tweetStream
+            .| concatMapC
+              ( \case
+                  SStatus status -> Just status
+                  _ -> Nothing
+              )
+            .| filterC ((/= 1497897132048760839) . view (statusUser . userId))
+            .| iterMC (liftIO . print)
+            .| mapC
+              ( \status ->
+                  ( status ^. statusId,
+                    status ^. statusUser . userScreenName
+                  )
+              )
+            .| iterMC (liftIO . print)
+            .| mapMC (lift . action)
+            .| sinkNull
+    )
+    (const $ return () :: SomeException -> RIO env ())
 
 getPhrases :: IO [Text]
 getPhrases = do
@@ -136,26 +147,57 @@ getPhrases = do
     auto
     phrasesFile
 
+makeReply scrrenName text = "@" <> screenName <> " " <> text
+
 replyTo :: HasAccess env => [Text] -> (StatusId, ScreenName) -> RIO env ()
 replyTo phrases (id, screenName) = do
   twinfo <- getTwinfo
   mgr <- liftIO getManager
   liftIO $ do
-    index <- randomIndex (length phrases - 1)
-    let replyText = "@" <> screenName <> " " <> (phrases !! index)
+    index <-  randomIndex (length phrases - 1)
+    let replyText = makeReply screenName (phrases !! index)
     call twinfo mgr (update replyText & #in_reply_to_status_id ?~ id)
     return ()
 
 main :: IO ()
 main = do
-  env <- Env <$> getTokens 
-             <*> getCredentials
-             <*> getBotConfig
+  configFile <- execParser optsParser
+  env <-
+    runRIO configFile $ do 
+     Env 
+      <$> getTokens
+      <*> getCredentials
+      <*> getBotConfig
   --timeline <- call twinfo mgr statusesHomeTimeline
-  runRIO env $ do 
+  runRIO env $ do
     triggeredPhrasesConfigs <- ask $^. (botConfigL . triggeredPhrases)
-    mapM_ (\triggeredPhrasesConfig -> do
-                performOnTracked  
-                    (triggeredPhrasesConfig ^. triggers) 
-                    (replyTo (triggeredPhrasesConfig ^. phrases)))
-          triggeredPhrasesConfigs
+    mapM_
+      ( \triggeredPhrasesConfig -> do
+          performOnTracked
+            (triggeredPhrasesConfig ^. triggers)
+            (replyTo (triggeredPhrasesConfig ^. phrases))
+      )
+      triggeredPhrasesConfigs
+
+--Options
+
+newtype ConfigFile = ConfigFile {conf :: FilePath}
+
+configFileParser :: Parser ConfigFile
+configFileParser =
+  ConfigFile
+    <$> strOption
+      ( long "config"
+          <> short 'c'
+          <> metavar "CONFIGFILE"
+          <> help "Config file"
+      )
+
+optsParser :: ParserInfo ConfigFile
+optsParser =
+  info
+    configFileParser
+    ( fullDesc
+        <> progDesc "Twitterbot"
+        <> header "good twitterbot"
+    )

@@ -29,4 +29,5 @@ executable twitterbot
         directory,
         filepath,
         rio,
-        random
+        random,
+        optparse-applicative,
