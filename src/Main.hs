@@ -4,6 +4,7 @@
 {-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PatternGuards #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# OPTIONS_GHC -Wno-deferred-out-of-scope-variables #-}
 
 import Conduit
@@ -20,7 +21,7 @@ import qualified Data.Text.Lazy
 import Dhall
 import Network.HTTP.Conduit as HTTP
 import Options.Applicative hiding (auto)
-import RIO (Exception, SomeException, RIO, UnliftIO (unliftIO), ask, asks, catch, runRIO, trace)
+import RIO (Exception, HasLogFunc, LogFunc, RIO, SomeException, UnliftIO (unliftIO), ask, asks, catch, displayShow, logFuncL, logInfo, logOptionsHandle, logWarn, runRIO, setLogUseLoc, setLogUseTime, stderr, trace, withLogFunc)
 import RIO.Text (decodeUtf8', encodeUtf8)
 import System.Directory
 import System.FilePath
@@ -34,15 +35,14 @@ import Web.Twitter.Types.Lens
 
 configFileDefault = "/etc/twitterbot.dhall"
 
-phrasesFile = "/home/dlahm/Projekte/TwitterBot/config/phrases.dhall"
-
 ($^.) :: Functor m => m a -> Getting b a b -> m b
 ($^.) m f = fmap (^. f) m
 
 data Env = Env
-  { tokens :: OAuth,
-    credentials :: Credential,
-    botConfig :: BotConfig
+  { tokens :: !OAuth,
+    credentials :: !Credential,
+    botConfig :: !BotConfig,
+    logFunction :: !LogFunc
   }
 
 class HasAccess env where
@@ -61,6 +61,9 @@ instance HasBotConfig Env where
 
 class HasConfigFile env where
   configFileL :: Lens' env String
+
+instance HasLogFunc Env where
+  logFuncL = lens logFunction (\x y -> x {logFunction = y})
 
 instance HasConfigFile ConfigFile where
   configFileL = lens conf (\x y -> x {conf = y})
@@ -112,7 +115,7 @@ randomIndex max = do
 
 type ScreenName = Text
 
-performOnTracked :: HasAccess env => [Text] -> ((StatusId, ScreenName) -> RIO env ()) -> RIO env ()
+performOnTracked :: (HasLogFunc env, HasAccess env) => [Text] -> ((StatusId, ScreenName) -> RIO env ()) -> RIO env ()
 performOnTracked keywords action = do
   twinfo <- getTwinfo
   mgr <- liftIO getManager
@@ -126,7 +129,10 @@ performOnTracked keywords action = do
                   SStatus status -> Just status
                   _ -> Nothing
               )
-            .| filterC ((/= 1497897132048760839) . view (statusUser . userId))
+            .| filterC (  (/= 1497897132048760839) 
+                        . view (statusUser . userId))
+            .| iterMC (\status -> logInfo $ 
+                "Incoming tweet " <> displayShow  (view statusId status))
             .| mapC
               ( \status ->
                   ( status ^. statusId,
@@ -136,7 +142,13 @@ performOnTracked keywords action = do
             .| mapMC (lift . action)
             .| sinkNull
     )
-    (const $ return () :: SomeException -> RIO env ())
+    ( \(e :: SomeException) -> do
+        logWarn
+          ( "Could not send Tweet: "
+              <> displayShow e
+          )
+        return ()
+    )
 
 makeReply screenName text = "@" <> screenName <> " " <> text
 
@@ -145,30 +157,43 @@ replyTo phrases (id, screenName) = do
   twinfo <- getTwinfo
   mgr <- liftIO getManager
   liftIO $ do
-    index <-  randomIndex (length phrases - 1)
+    index <- randomIndex (length phrases - 1)
     let replyText = makeReply screenName (phrases !! index)
     call twinfo mgr (update replyText & #in_reply_to_status_id ?~ id)
     return ()
 
+test :: HasLogFunc env => RIO env ()
+test = do
+  logWarn "Pommehero"
+
 main :: IO ()
 main = do
   configFile <- execParser optsParser
-  env <-
-    runRIO configFile $ do 
-     Env 
-      <$> getTokens
-      <*> getCredentials
-      <*> getBotConfig
-  --timeline <- call twinfo mgr statusesHomeTimeline
-  runRIO env $ do
-    triggeredPhrasesConfigs <- ask $^. (botConfigL . triggeredPhrases)
-    mapM_
-      ( \triggeredPhrasesConfig -> do
-          performOnTracked
-            (triggeredPhrasesConfig ^. triggers)
-            (replyTo (triggeredPhrasesConfig ^. phrases))
+  logOptions' <- logOptionsHandle stderr False
+  let logOptions = setLogUseTime True $ setLogUseLoc True logOptions'
+  withLogFunc
+      logOptions
+      ( \logFunc -> do
+          configEnv <-
+           runRIO configFile $ do
+           Env
+                <$> getTokens
+                <*> getCredentials
+                <*> getBotConfig
+          let env = configEnv logFunc
+          runRIO env $ do
+            twinfo <- getTwinfo
+            mgr <- liftIO getManager
+            timeline <- liftIO $ call twinfo mgr statusesHomeTimeline
+            triggeredPhrasesConfigs <- ask $^. (botConfigL . triggeredPhrases)
+            mapM_
+                ( \triggeredPhrasesConfig -> do
+                    performOnTracked
+                        (triggeredPhrasesConfig ^. triggers)
+                        (replyTo (triggeredPhrasesConfig ^. phrases))
+                )
+                triggeredPhrasesConfigs
       )
-      triggeredPhrasesConfigs
 
 --Options
 
