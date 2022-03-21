@@ -116,7 +116,6 @@ performOnTracked :: HasAccess env => [Text] -> ((StatusId, ScreenName) -> RIO en
 performOnTracked keywords action = do
   twinfo <- getTwinfo
   mgr <- liftIO getManager
-  phrases <- liftIO getPhrases
   catch
     ( runResourceT $ do
         tweetStream <- stream twinfo mgr (statusesFilter [Track keywords])
@@ -140,12 +139,6 @@ performOnTracked keywords action = do
             .| sinkNull
     )
     (const $ return () :: SomeException -> RIO env ())
-
-getPhrases :: IO [Text]
-getPhrases = do
-  input
-    auto
-    phrasesFile
 
 makeReply screenName text = "@" <> screenName <> " " <> text
 
