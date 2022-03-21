@@ -147,7 +147,7 @@ getPhrases = do
     auto
     phrasesFile
 
-makeReply scrrenName text = "@" <> screenName <> " " <> text
+makeReply screenName text = "@" <> screenName <> " " <> text
 
 replyTo :: HasAccess env => [Text] -> (StatusId, ScreenName) -> RIO env ()
 replyTo phrases (id, screenName) = do
