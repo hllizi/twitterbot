@@ -127,14 +127,12 @@ performOnTracked keywords action = do
                   _ -> Nothing
               )
             .| filterC ((/= 1497897132048760839) . view (statusUser . userId))
-            .| iterMC (liftIO . print)
             .| mapC
               ( \status ->
                   ( status ^. statusId,
                     status ^. statusUser . userScreenName
                   )
               )
-            .| iterMC (liftIO . print)
             .| mapMC (lift . action)
             .| sinkNull
     )
