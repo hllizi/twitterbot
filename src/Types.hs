@@ -22,9 +22,19 @@ customAuto = genericAutoWith
                 }
                 )
 
+data Secrets = Secrets {
+     consumerKey :: !Text
+   , consumerSecret :: !Text
+   , accessToken :: !Text
+   , accessSecret :: !Text
+}
+    deriving (Generic, Show)
+
+instance ToDhall Secrets
+
 data Consumer = Consumer
-  { _consKey :: Text,
-    _consSecret :: Text 
+  { _consKey :: !Text,
+    _consSecret :: !Text 
   }
   deriving (Generic, Show)
 

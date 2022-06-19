@@ -129,7 +129,7 @@ performOnTracked keywords action = do
                   SStatus status -> Just status
                   _ -> Nothing
               )
-            .| filterC (  (/= 1497897132048760839) 
+            .| filterC ((/= 1497897132048760839) 
                         . view (statusUser . userId))
             .| iterMC (\status -> logInfo $ 
                 "Incoming tweet " <> displayShow  (view statusId status))
