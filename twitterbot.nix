@@ -1,7 +1,8 @@
 { mkDerivation, base, bytestring, case-insensitive, conduit
 , conduit-extra, containers, dhall, directory, filepath
-, http-conduit, lens, lib, network-uri, process, random, resourcet
-, rio, text, twitter-conduit, twitter-types-lens
+, http-conduit, lens, lib, network-uri, optparse-applicative
+, process, random, resourcet, rio, text, twitter-conduit
+, twitter-types-lens, zlib
 }:
 mkDerivation {
   pname = "twitterbot";
@@ -11,8 +12,10 @@ mkDerivation {
   isExecutable = true;
   executableHaskellDepends = [
     base bytestring case-insensitive conduit conduit-extra containers
-    dhall directory filepath http-conduit lens network-uri process
-    random resourcet rio text twitter-conduit twitter-types-lens
+    dhall directory filepath http-conduit lens network-uri
+    optparse-applicative process random resourcet rio text
+    twitter-conduit twitter-types-lens
   ];
+  executableSystemDepends = [ zlib ];
   license = lib.licenses.agpl3Plus;
 }

@@ -31,3 +31,5 @@ executable twitterbot
         rio,
         random,
         optparse-applicative,
+    extra-libraries:
+        z

@@ -1,13 +1,26 @@
-let overlay = final: prev: rec {
-      haskellPackages = prev.haskellPackages.override {
-        overrides = haskellPackagesNew: haskellPackagesOld: rec {
-          twitterbot = haskellPackages.callPackage ./twitterbot.nix { };
-          twitter-types = haskellPackages.callPackage ./twitter-types.nix { };
+let 
+  compiler = "ghc8107";
+  overlays = [(
+    final: prev:
+      rec {
+        haskell = prev.haskell // { 
+          packages = prev.haskell.packages // {
+            "${compiler}" = prev.haskell.packages."${compiler}".override 
+            {
+              overrides = haskellPackagesNew: haskellPackagesOld:
+              rec  {
+                twitterbot = haskellPackagesNew.callPackage ./twitterbot.nix { };
+                twitter-types = haskellPackagesNew.callPackage ./twitter-types.nix { };
+              };
+            };
+          };
         };
-        };
-      };
-    pkgs = import <nixpkgs> { overlays = [overlay]; };
+      }
+    )
+  ];
+
+  pkgs = import <nixpkgs> { overlays = overlays; };
 in
   {
-    twitterbot = pkgs.haskellPackages.twitterbot;
+    twitterbot = pkgs.haskell.packages."${compiler}".twitterbot;
   }
